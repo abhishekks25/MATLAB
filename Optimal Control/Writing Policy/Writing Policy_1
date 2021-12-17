@@ -1,0 +1,428 @@
+clear all, close all,
+IM = imread('AllLetters.jpg');
+IM2 = rgb2gray(IM);
+BN  = [IM2<100];
+regprops = regionprops(BN);
+imshow(BN)
+
+%%  
+num = length(regprops);
+Ibox = [regprops.BoundingBox];
+Ibox = reshape(Ibox,[4 num]);
+
+letters = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','0','1','2','3','4','5','6','7','8','9'];
+centroids = cat(1, regprops.Centroid);
+[centroidssorted,indexsortedrow] = sort(centroids(:,2));
+line1        = indexsortedrow(1:9);
+[~,indexsortedcolumn1] = sort(centroids(line1,1));
+line2        = indexsortedrow(10:18); [~,indexsortedcolumn2] = sort(centroids(line2,1));
+line3        = indexsortedrow(19:26); [~,indexsortedcolumn3] = sort(centroids(line3,1));
+line4        = indexsortedrow(27:36); [~,indexsortedcolumn4] = sort(centroids(line4,1));
+orderedline1 = line1(indexsortedcolumn1);
+orderedline2 = line2(indexsortedcolumn2);
+orderedline3 = line3(indexsortedcolumn3);
+orderedline4 = line4(indexsortedcolumn4);
+orderedletters = [orderedline1; orderedline2; orderedline3; orderedline4];
+
+BNP = zeros(size(BN));
+imshow(BNP)
+hold on
+r = 8;
+for j = 1:length(letters)
+    i = orderedletters(j);
+    [controlpoints,links] = getcontrolpoints(letters(j));
+    a1 = Ibox(2,i);
+    a2 = Ibox(1,i);
+    for k = 1:size(controlpoints,2)
+        rectangle('Position',[a2+controlpoints(1,k)-r/2,a1+controlpoints(2,k)-r/2,r,r],'Curvature',[1 1],'Facecolor',[1 1 1])
+    end
+    for k = 1:size(links,2)
+        plot( [a2+controlpoints(1,links(1,k)) a2+controlpoints(1,links(2,k))] , [a1+controlpoints(2,links(1,k)) a1+controlpoints(2,links(2,k))],'Linewidth',4,'Color',[1 1 1])
+    end
+end
+
+
+%% Assignment 1
+costupdown      = 10; % cost of lifting the pen and of lowering the pen as well
+indDestination  = 1;  % for letter 'A' can be any number between 1 and 6 is allowed since 'A' has 6 control points
+[ctrpoints,links] = getcontrolpoints('A');
+[costM] = costToDestinationletter(ctrpoints,links,costupdown,indDestination);
+
+
+% the output when calling this function for letter A is
+
+%% Assignment 2
+
+
+
+%% Function Definitions
+
+function [costM,path] = costToDestinationletter(ctrpoints,links,costupdown,indDestination)
+    nctr = size(ctrpoints,2);
+    nlnk = size(links,2);
+    costM = zeros(nctr);
+    sysState = zeros(1,nlnk);
+    Stages = 2*nlnk;
+    States = nctr*(2^nlnk);
+    u = 1:nctr;
+    
+    %Cost Calculation
+    g = zeros(1,nctr);
+    D = 2*costupdown*ones(nctr);
+    for i=1:nctr               %Calculate Euclidean distance between each control points
+    for j=1:nctr
+        g(i,j) = sqrt((ctrpoints(1,i)-ctrpoints(1,j))^2+(ctrpoints(2,i)-ctrpoints(2,j))^2);
+    end
+    end
+
+
+for k=1:size(links,2)                   %Equate Cost up-down to zero wherever a direct link exists between control point
+    i = links(1,k);
+    j = links(2,k);
+    D(i,j) = 0;
+    D(j,i) = 0;
+end
+g = g+D;        
+
+for i=1:size(g,1)                       %Set cost of going form one state to itself as infinity
+    for j=1:size(g,2)
+        if(i==j)
+            g(i,j) = 0;
+        end
+    end
+end
+
+    %M and C definition
+   
+    for i = 1:Stages-1
+       for j = 1:States           
+          for k = 1:length(u)
+              q = floor((j-1)/nctr);
+              curA = deci2bin(q,nlnk);
+              r = mod(j,nctr);
+              if r==0
+                 r=nctr; 
+              end
+              M{i}{j}{k} = k+nctr*bin2dec(getSysState(curA,r,k,links));
+              C{i}{j}{k} = g(r,k);
+          end
+       end
+    end
+    
+        
+    Jh = Inf*ones(States,1);
+    endstate = ones(1,nlnk);
+    Jh(indDestination+nctr*bin2dec(endstate)) = 0;
+    
+    [u_,J] = dptv(M,C,Jh);
+     costM = cell2mat(J{1}(1:nctr));
+     
+%     tmp = 1;
+%     tmp2 = 1;
+%     sysState = zeros(1,nlnk);
+%         for i = 1:nctr
+%             for j = 1:Stages
+%             path{i}{j}{1} = u_{j}{tmp2}(2);       %decision = destintion ctrpnt number
+% %             if path{i}{j}{1}==tmp2
+% %                path{i}{j}{1} = u_{j}{tmp2}(1);  
+% %             end
+%             tmp2 = path{i}{j}{1};      % destination ctrpnt num
+%             sysState = getSysState(sysState,tmp,tmp2,links);
+%             path{i}{j}{2} = sysState;
+%             tmp2 = tmp2 + nctr*bin2dec(sysState);    %destination state            
+%             tmp = path{i}{j}{1};                %initial point for next iteration.
+%         end
+%     
+% end
+    
+    
+    
+    
+end
+
+function [state] = getSysState(A,inP,fP,links)
+    state = A;
+    temp1 = [inP;fP];
+    temp2 = [fP;inP];
+    for l = 1:length(links)
+      if (sum(links(:,l) == temp1)==2 || sum(links(:,l)== temp2)==2)
+          state(l) = 1;
+      end
+    end
+end
+
+function [dec] = bin2dec(A)
+    dec = 0;
+    for i = 1:length(A)
+        dec = dec + (A(i)*(2^(i-1)));
+    end
+end
+
+function [bin] = deci2bin(A,digits)
+    bin = zeros(1,digits);
+    temp = reverse(dec2bin(A,digits));
+    for i=1:digits
+       bin(i) = str2num(temp(i)); 
+    end
+    
+    
+end
+
+function [u,J] = dptv( M, C, T)
+h = length(M);
+for l = 1:length(T)
+    J_{h+1}{l} = T(l);
+end
+for k = h:-1:1
+    ni = length(M{k}); % state dimension
+    for i=1:ni
+        nj = length(M{k}{i});
+        caux = zeros(1,nj);
+        for j = 1:nj
+            caux(j) = C{k}{i}{j} + J_{k+1}{M{k}{i}{j}};
+        end
+         [a,b] = sort(caux);
+        J_{k}{i} = a(1); J{k}{i} = J_{k}{i};
+        u{k}{i}(1) = b(1);
+        for ell = 2:length(a)
+            if abs( a(ell) - a(1))<1e-8
+                u{k}{i}(ell) = b(ell);
+            else
+                break;
+            end
+        end
+    end
+end
+end
+
+
+function [controlpoints,links] = getcontrolpoints(letter)
+switch letter
+    case 'A'
+        controlpoints = [6   16   31   39   54   64;
+            77  51    6    6   51   77];
+        links = [1 2 3 4 5 5
+            2 3 4 5 2 6];
+    case 'B'
+        controlpoints = [7   40   48   52   48   40  48  55  48  40   7   7;
+            5    5    9   20   30   37  41  54  67  72  72  37];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12 12;
+            2 3 4 5 6 7 8 9 10 11 12  6  1];
+    case 'C'
+        controlpoints = [64    60    50    27    14     9     9    14    27    50    59    65;
+            26    15     8     8    16    26    56    68    76    76    68    52];
+        links = [1 2 3 4 5 6 7 8 9  10 11;
+            2 3 4 5 6 7 8 9 10 11 12];
+    case 'D'
+        controlpoints =  [7    38    51    58    58    51    38     7;
+            6     6    12    25    46    63    73    73];
+        links = [1 2 3 4 5 6 7 8;
+            2 3 4 5 6 7 8 1];
+    case 'E'
+        controlpoints = [56     6     6    53     6    56;
+            6     6    38    38    73    73];
+        links = [1 2 3 3 5;
+            2 3 4 5 6];
+    case 'F'
+        controlpoints =  [52     6     6    47     6 ;
+            6     6    38    38    76];
+        links = [1 2 3 3;
+            2 3 4 5];
+    case 'G'
+        controlpoints =  [65    60    47    30    15     9     9    15    30    48    62    66    66    38    67;
+            26    15     7     7    16    27    53    68    78    78    67    52    44    44    80];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12 13 12;
+            2 3 4 5 6 7 8 9 10 11 12 13 14 15];
+    case 'H'
+        controlpoints =  [7     7     7    57    57    57;
+            3    37    77    37     3    77];
+        links = [1 2 2 4 4;
+            2 3 4 5 6];
+    case 'I'
+        controlpoints =  [6     6     6;
+            3    37    77];
+        links = [1 2;
+            2 3];
+    case 'J'
+        controlpoints = [40    40    36    28    17    10     6     6;
+            1    63    71    76    76    71    63    53];
+        links = [1 2 3 4 5 6 7
+            2 3 4 5 6 7 8];
+    case 'K'
+        controlpoints = [6     6     6    24    54    56;
+            2    47    77    31     2    77];
+        links = [1 2 2 4 4
+            2 3 4 5 6];
+    case 'L'
+        controlpoints = [6     6    50;
+            1    73    73];
+        links = [1 2;
+            2 3];
+    case 'M'
+        controlpoints = [7     8    15    39    65    71    71;
+            77     7     7    75     7     7    77 ];
+        links = [1 2 3 4 5 6
+            2 3 4 5 6 7];
+    case 'N'
+        controlpoints = [7     7    57    57 ;
+            77     1    77     1];
+        links = [1 2 3;
+            2 3 4];
+    case 'O'
+        controlpoints = [48    63    70    70    63    48    30    14     7     7    14    30;
+            6    16    32    50    66    76    76    67    50    32    16     6];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12;
+            2 3 4 5 6 7 8 9 10 11 12 1];
+    case 'P'
+        controlpoints = [ 7     7     7    43    49    53    53    50    43;
+            77    41     6     6    11    19    27    33    41];
+        links = [1 2 3 4 5 6 7 8 9;
+            2 3 4 5 6 7 8 9 2];
+    case 'Q'
+        controlpoints = [48    63    70    70    59    48    30    14     7     7    14    30  45 72;
+            6    16    32    50    72    76    76    67    50    32    16     6  61 82];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12 5 5;
+            2 3 4 5 6 7 8 9 10 11 12 1 13 14];
+    case 'R'
+        controlpoints = [7     7     7    43    50    56    56    51    44    54    56    58;
+            77    41     5     5     9    17    26    34    41    50    70    77];
+        links = [1 2 3 4 5 6 7 8 9  10 11 2;
+            2 3 4 5 6 7 8 9 10 11 12 9];
+    case 'S'
+        controlpoints = [56    51    41    22     9    10    18    52    57    57    50    41    23    12     7;
+            25    13     6     6    17    30    37    47    53    67    74    77    77    71    55];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12 13 14;
+            2 3 4 5 6 7 8 9 10 11 12 13 14 15];
+    case 'T'
+        controlpoints = [2    33    63    33;
+            6     6     6    77];
+        links = [1 2 2;
+            2 3 4];
+    case 'U'
+        controlpoints = [6     6    11    24    38    50    56    56;
+            1    55    68    75    75    68    55     2];
+        links = [1 2 3 4 5 6 7;
+            2 3 4 5 6 7 8];
+    case 'V'
+        controlpoints = [7    34    62;
+            2    76     2];
+        links = [1 2;
+            2 3];
+    case 'W'
+        controlpoints = [7    26    49    72    92;
+            3    76     3    76     3];
+        links = [1 2 3 4;
+            2 3 4 5];
+    case 'X'
+        controlpoints = [10    35     7    61    60;
+            1    39    77    77     2];
+        links = [1 2 2 2;
+            2 3 4 5];
+    case 'Y'
+        controlpoints = [8    35    63    35;
+            2    47     2    77];
+        links = [1 2 2;
+            2 3 4];
+    case 'Z'
+        controlpoints = [6    59     3    61;
+            5     5    73    73];
+        links = [1 2 3;
+            2 3 4];
+    case '0'
+        controlpoints = [34    44    48    48    44    35    22    11     7     7    12    22;
+            6    14    27    51    64    73    73    64    51    27    14     6];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12;
+            2 3 4 5 6 7 8 9 10 11 12 1];
+    case '1'
+        controlpoints = [   2    13    21    26    26;
+            19    18    13     2    75];
+        links = [1 2 3 4;
+            2 3 4 5];
+    case '2'
+        controlpoints = [   7    10    22    36    46    46    41    19    10     7    51;
+            28    15     7     7   14    30    39    52    60    73    73];
+        links = [1 2 3 4 5 6 7 8 9  10;
+            2 3 4 5 6 7 8 9 10 11];
+    case '3'
+        controlpoints = [   8    10    20    36    45    45    39    23    39    48    48    42    36    21    10     7   ;
+            25    13     5     5    12    27    33    37    40    44    59    68    73    73    68    60  ];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12 13 14 15;
+            2 3 4 5 6 7 8 9 10 11 12 13 14 15 16];
+    case '4'
+        controlpoints = [   2    39    39    39    54;
+            55     6    55    76    55  ];
+        links = [1 2 3 3 3;
+            2 3 4 5 1];
+    case '5'
+        controlpoints = [  48    12     8    15    23    33    39    47    47    42    34    20    10     6;
+            6     6    41    35    32    32    35    44    57    66    73    73    67    55];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12 13;
+            2 3 4 5 6 7 8 9 10 11 12 13 14];
+    case '6'
+        controlpoints = [47    44    36    24    14     9     9    13    22    34    44    48    48    43    36    24    11;
+            22    12     7     7    13    23    58    68    74    74    68    58    47    38    34    34    44];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12 13 14 15 16 17;
+            2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 7];
+    case '7'
+        controlpoints = [1    53    40    31    23    17 ;
+            6     6    18    34    51    75 ];
+        links = [1 2 3 4 5;
+            2 3 4 5 6];
+    case '8'
+        controlpoints = [37    45    45    37    47    47    36    20     8     8    22    11    11    21;
+            8    16    28    37    50    63    75    75    63    50    37    28    16     8];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12 13 14 4;
+            2 3 4 5 6 7 8 9 10 11 12 13 14  1 11];
+    case '9'
+        controlpoints = [37    30    21    15     7     7    15    22    31    38    46    46    43    32    19     9     7;
+            43    46    46    44    34    20     9     6     6     8    20    50    62    74    74    68    58];
+        links = [1 2 3 4 5 6 7 8 9  10 11 12 13 14 15 16 1;
+            2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 11];
+end
+end
+
+function [ctrpointsglobalframe,doublemessage] = transformctrpoints(message_,Allcontrolpoints,orderedletters,letters,Ibox,spacing)
+
+% remove spaces
+ell = 1;
+auxvec = 1:length(letters);
+for i = 1:length(message_)
+    if message_(i) == ' '
+        specialspacing(ell-1) = 1;
+    else
+        message(ell) = message_(i);
+        d = double(message(ell));
+        if d <= 57
+            doublemessage(ell) = d-48 + 26 + 1;
+        else
+            doublemessage(ell) = d-65+1;
+        end
+        specialspacing(ell) = 0;
+        indvector(ell) = auxvec(message(ell) == letters);
+        ell = ell+1;
+    end
+end
+
+%
+for j = 1:length(message)
+    i = orderedletters(indvector(j));
+    Boundbox(:,j) = Ibox(:,i);
+end
+
+
+% compute dimensions of final image: sum of witdhs of bounding boxes + spacing
+currentcollum = 0;
+for j = 1:length(message)
+    if specialspacing(j) == 0
+        spacing_ = spacing;
+    else
+        spacing_ = 3*spacing;
+    end
+    ctrpoints = Allcontrolpoints{doublemessage(j)};
+    for n = 1:size(ctrpoints,2)
+        ctrpointsglobalframe{j}(1,n) = currentcollum + ctrpoints(1,n);
+        ctrpointsglobalframe{j}(2,n) = ctrpoints(2,n);
+    end
+    currentcollum = currentcollum+Boundbox(3,j)+spacing_;
+end
+end
